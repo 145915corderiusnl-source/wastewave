@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WasteWave — interactieve rondleiding</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#071b2a;color:#eef8ff;font:16px Arial,sans-serif}
+header{padding:14px 18px;background:#0b2c40;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+h1{font-size:22px;margin:0}header span{color:#9bd9e8;font-size:14px}
+main{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;padding:14px;max-width:1300px;margin:auto}
+#screen{position:relative;min-height:440px;border:2px solid #28758c;border-radius:12px;overflow:hidden;background:#102d3c}
+canvas{display:block;width:100%;height:100%;position:absolute;inset:0}
+#hud{position:absolute;left:12px;top:12px;padding:9px 11px;border-radius:8px;background:#061723d9;font-size:13px;line-height:1.5;max-width:80%}
+#hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);padding:9px 12px;background:#061723e8;border-radius:8px;font-size:13px;white-space:nowrap}
+aside{background:#0b2c40;border-radius:12px;padding:16px}
+aside h2{font-size:18px;margin:0 0 8px}aside p{color:#c6e0ea;line-height:1.45;font-size:14px}
+button{background:#16a6b7;color:#031923;border:0;border-radius:8px;padding:10px 12px;font-weight:bold;cursor:pointer;margin:4px 3px 4px 0}
+button:hover{background:#75e0e7}.active{background:#ffe08a!important}
+#places{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0}
+#status{font-size:13px;color:#9bd9e8;margin-top:12px}
+@media(max-width:800px){main{grid-template-columns:1fr}#screen{min-height:380px}}
+</style>
+</head>
+<body>
+<header><h1>🌊 WasteWave</h1><span>Interactieve rondleiding — werkt lokaal op je laptop</span></header>
+<main>
+<section id="screen">
+<canvas id="view" aria-label="Interactieve 3D-achtige weergave van het schip"></canvas>
+<div id="hud"><b id="loc">Brug</b><br><span id="desc">Kijk rond in het schip en bezoek de verschillende ruimtes.</span></div>
+<div id="hint">Klik in het beeld en gebruik ← → of A / D om rond te kijken · W / S om te lopen</div>
+</section>
+<aside>
+<h2>Loop door het schip</h2>
+<p>Dit is een interactieve first-person rondleiding. Kies een ruimte of loop met je toetsenbord. Het afval wordt verzameld en opgeslagen — het wordt <b>niet verbrand</b>. De kernreactor levert energie voor de elektrische aandrijving.</p>
+<div id="places"></div>
+<button id="left">↶ Kijk links</button><button id="right">Kijk rechts ↷</button>
+<button id="forward">Vooruit</button><button id="back">Achteruit</button>
+<p id="status">Besturing actief. Geen VR-bril nodig.</p>
+</aside>
+</main>
+<script>
+(() => {
+const canvas=document.getElementById('view'),ctx=canvas.getContext('2d');
+const places=[
+{name:'Brug',desc:'Vanaf de brug stuurt de bemanning WasteWave over zee.',color:'#174a60',objects:['Raam','Radar','Bedieningspaneel']},
+{name:'Dek',desc:'Het schip vaart door drijvend afval heen en verzamelt het met een transportsysteem.',color:'#245466',objects:['Transportband','Netten','Drijvend afval']},
+{name:'Sorteerhal',desc:'Het verzamelde afval wordt gesorteerd en veilig opgeslagen. Er wordt niets verbrand.',color:'#34545d',objects:['Sorteerband','Plastic opslag','Metaalbakken']},
+{name:'Opslagruimte',desc:'Gesorteerd afval staat in aparte bakken klaar om aan wal te worden afgevoerd.',color:'#3b4c59',objects:['Plastic','Metaal','Overig afval']},
+{name:'Reactorruimte',desc:'De kernreactor maakt warmte. Via een turbine en generator wordt elektriciteit opgewekt voor de motoren.',color:'#4b4357',objects:['Kernreactor','Turbine','Generator']},
+{name:'Motorruimte',desc:'Elektrische motoren draaien de schroeven. De reactor levert energie; afval is geen brandstof.',color:'#264b5c',objects:['Elektromotor','Aandrijfas','Koeling']}
+];
+let current=0,angle=0,step=0,drag=false,lastX=0;
+const placeBox=document.getElementById('places');
+places.forEach((p,i)=>{let b=document.createElement('button');b.textContent=p.name;b.onclick=()=>go(i);placeBox.appendChild(b)});
+function go(i){current=i;step=0;document.getElementById('loc').textContent=places[i].name;document.getElementById('desc').textContent=places[i].desc;[...placeBox.children].forEach((b,j)=>b.classList.toggle('active',j===i));draw()}
+function resize(){let r=canvas.getBoundingClientRect();let d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0);draw()}
+function poly(points,fill,stroke){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}}
+function line(points,color,width=2){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke()}
+function text(t,x,y,size=16,color='#fff',align='center'){ctx.fillStyle=color;ctx.font=`bold ${size}px Arial`;ctx.textAlign=align;ctx.fillText(t,x,y)}
+function draw(){
+ const w=canvas.clientWidth||800,h=canvas.clientHeight||440;if(!w||!h)return;
+ ctx.clearRect(0,0,w,h);
+ const p=places[current],shift=Math.sin(angle)*w*.055+Math.sin(step)*w*.018;
+ // Sky and sea / interior background
+ let grad=ctx.createLinearGradient(0,0,0,h);grad.addColorStop(0,'#8bd2e2');grad.addColorStop(.47,'#246b85');grad.addColorStop(.48,'#123b4d');grad.addColorStop(1,'#071d2b');ctx.fillStyle=grad;ctx.fillRect(0,0,w,h);
+ if(current===0||current===1){
+   // horizon and ocean
+   for(let i=0;i<8;i++){line([[0,h*.48+i*7],[w,h*.48+i*7]],`rgba(175,239,255,${.15-i*.012})`,1)}
+   // hull deck
+   poly([[w*.04,h*.65],[w*.96,h*.65],[w*.83,h*.96],[w*.17,h*.96]],'#536b76','#b4d2db');
+   poly([[w*.15,h*.65],[w*.85,h*.65],[w*.75,h*.84],[w*.25,h*.84]],p.color,'#d2edf2');
+   if(current===0){
+     // bridge windows
+     poly([[w*.22+shift,h*.22],[w*.78+shift,h*.22],[w*.84+shift,h*.55],[w*.16+shift,h*.55]],'#092c3c','#9ae7f4');
+     for(let i=1;i<5;i++)line([[w*(.22+i*.112)+shift,h*.23],[w*(.22+i*.112)+shift,h*.54]],'#77bdce',3);
+     poly([[w*.38,h*.56],[w*.62,h*.56],[w*.59,h*.64],[w*.41,h*.64]],'#1b2b34','#9ae7f4');text('WASTE WAVE',w*.5,h*.61,Math.max(12,w*.02));
+     poly([[w*.46,h*.08],[w*.54,h*.08],[w*.52,h*.22],[w*.48,h*.22]],'#e2eef0','#4e7e8d');line([[w*.5,h*.08],[w*.5,h*.015]],'#193f50',3);line([[w*.5,h*.02],[w*.56,h*.02]],'#193f50',2);
+     text('BRUG',w*.5,h*.18,Math.max(15,w*.024),'#063047');
+   }else{
+     poly([[w*.13+shift,h*.53],[w*.85+shift,h*.53],[w*.76+shift,h*.7],[w*.2+shift,h*.7]],'#c0d2d6','#e6f7fa');
+     // conveyor belt
+     poly([[w*.28,h*.43],[w*.72,h*.43],[w*.81,h*.57],[w*.19,h*.57]],'#1a2930','#e2f3f5');
+     for(let i=0;i<7;i++){let x=w*(.25+i*.085)+shift;poly([[x,h*.44],[x+w*.025,h*.44],[x+w*.04,h*.51],[x-w*.005,h*.51]],['#ffce63','#f2f5f7','#7fe0dc'][i%3],'#153d4b')}
+     text('AFVAL VERZAMELEN',w*.5,h*.36,Math.max(14,w*.022));
+     // sea plastic
+     for(let i=0;i<9;i++){let x=((i*79+Math.floor(w*.1))%Math.floor(w*.8))+w*.1;poly([[x,h*.83],[x+12,h*.81],[x+22,h*.84],[x+5,h*.86]],['#ffce63','#e7f5f7','#8be3d6'][i%3])}
+   }
+ } else {
+   // room perspective
+   poly([[0,0],[w,0],[w*.79,h*.72],[w*.21,h*.72]],'#183848','#6595a3');
+   poly([[0,h],[w,h],[w*.79,h*.72],[w*.21,h*.72]],'#172b36','#6595a3');
+   poly([[0,0],[w*.21,h*.72],[w*.21,h],[0,h]],'#244452','#6595a3');
+   poly([[w,0],[w*.79,h*.72],[w*.79,h],[w,h]],'#1d3b49','#6595a3');
+   // ceiling lights
+   for(let i=0;i<4;i++){let x=w*(.25+i*.17)+shift*.25;poly([[x,h*.09],[x+w*.09,h*.09],[x+w*.115,h*.14],[x-w*.02,h*.14]],'#e8f7c6','#91bdc3')}
+   const names=p.objects;
+   if(current===2){
+     // sorting conveyor
+     poly([[w*.15,h*.53],[w*.85,h*.53],[w*.72,h*.68],[w*.28,h*.68]],'#18242a','#a9c5cc');
+     for(let i=0;i<6;i++){let x=w*(.25+i*.09);poly([[x,h*.48],[x+w*.04,h*.48],[x+w*.055,h*.57],[x-w*.005,h*.57]],['#ffc857','#e9f0ef','#6de0c8'][i%3])}
+     poly([[w*.12,h*.67],[w*.35,h*.67],[w*.33,h*.86],[w*.1,h*.86]],'#426777','#a9d8e2');poly([[w*.65,h*.67],[w*.89,h*.67],[w*.91,h*.86],[w*.67,h*.86]],'#426777','#a9d8e2');
+   } else if(current===3){
+     for(let i=0;i<3;i++){let x=w*(.17+i*.25);poly([[x,h*.48],[x+w*.18,h*.48],[x+w*.2,h*.78],[x-w*.02,h*.78]],['#3c7c87','#7c8d94','#a67c52'][i],'#c8e6e9');line([[x,h*.56],[x+w*.16,h*.56]],'#d8eff1',2);text(['PLASTIC','METAAL','OVERIG'][i],x+w*.09,h*.64,Math.max(10,w*.014))}
+   } else if(current===4){
+     // reactor vessel and glow
+     ctx.fillStyle='rgba(90,240,201,.14)';ctx.beginPath();ctx.arc(w*.5,h*.48,w*.19,0,Math.PI*2);ctx.fill();
+     poly([[w*.38,h*.32],[w*.62,h*.32],[w*.66,h*.68],[w*.34,h*.68]],'#748d9a','#d5f1f5');
+     poly([[w*.4,h*.29],[w*.6,h*.29],[w*.62,h*.36],[w*.38,h*.36]],'#c3d8de','#eafaff');
+     for(let i=0;i<5;i++)line([[w*(.42+i*.04),h*.39],[w*(.42+i*.04),h*.62]],'#45d8ba',3);
+     poly([[w*.12,h*.53],[w*.29,h*.53],[w*.32,h*.67],[w*.1,h*.67]],'#526d7a','#d5f1f5');text('TURBINE',w*.21,h*.61,Math.max(10,w*.013));
+     poly([[w*.7,h*.53],[w*.88,h*.53],[w*.9,h*.67],[w*.68,h*.67]],'#526d7a','#d5f1f5');text('GENERATOR',w*.79,h*.61,Math.max(10,w*.013));
+   } else if(current===5){
+     poly([[w*.13,h*.5],[w*.41,h*.5],[w*.44,h*.7],[w*.1,h*.7]],'#537887','#cdeaf0');poly([[w*.59,h*.5],[w*.87,h*.5],[w*.9,h*.7],[w*.56,h*.7]],'#537887','#cdeaf0');
+     for(let i=0;i<4;i++){let x=w*(.18+i*.17);ctx.beginPath();ctx.ellipse(x,h*.6,w*.045,h*.07,0,0,Math.PI*2);ctx.fillStyle='#102630';ctx.fill();ctx.strokeStyle='#7ce5e4';ctx.lineWidth=3;ctx.stroke()}
+     line([[w*.2,h*.77],[w*.8,h*.77]],'#e2b95e',5);text('ELEKTRISCHE AANDRIJVING',w*.5,h*.84,Math.max(12,w*.019))
+   }
+   text(p.name.toUpperCase(),w*.5,h*.25,Math.max(15,w*.024),'#effcff');
+ }
+ // vignette and central reticle
+ let v=ctx.createRadialGradient(w/2,h/2,Math.min(w,h)*.2,w/2,h/2,Math.max(w,h)*.7);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.3)');ctx.fillStyle=v;ctx.fillRect(0,0,w,h);
+ ctx.strokeStyle='rgba(235,255,255,.75)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(w/2-7,h/2);ctx.lineTo(w/2+7,h/2);ctx.moveTo(w/2,h/2-7);ctx.lineTo(w/2,h/2+7);ctx.stroke();
+}
+function turn(n){angle+=n*.25;draw()}
+function move(n){step+=n*.3;draw()}
+document.getElementById('left').onclick=()=>turn(-1);document.getElementById('right').onclick=()=>turn(1);document.getElementById('forward').onclick=()=>move(1);document.getElementById('back').onclick=()=>move(-1);
+window.addEventListener('keydown',e=>{if(['ArrowLeft','a','A'].includes(e.key))turn(-1);if(['ArrowRight','d','D'].includes(e.key))turn(1);if(['ArrowUp','w','W'].includes(e.key))move(1);if(['ArrowDown','s','S'].includes(e.key))move(-1)});
+canvas.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;canvas.setPointerCapture(e.pointerId)});canvas.addEventListener('pointermove',e=>{if(drag){angle+=(e.clientX-lastX)/130;lastX=e.clientX;draw()}});canvas.addEventListener('pointerup',()=>drag=false);canvas.addEventListener('pointercancel',()=>drag=false);
+window.addEventListener('resize',resize);go(0);resize();
+})();
+</script>
+</body></html>
